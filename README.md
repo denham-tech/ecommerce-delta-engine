@@ -4,8 +4,8 @@ Relational delta processing engine designed to isolate state changes between e-c
 
 ## Core Capabilities
 - **Relational Snapshot Diffing:** Outer merge comparison on variant primary keys (`variant_id`).
-- **State Transition Classification:** Identifies `PRODUCT_ADDED`, `PRODUCT_REMOVED`, `PRICE_CHANGE`, `STOCKOUT`, and `RESTOCK`.
-- **CLI & Automated Reporting:** Accepts external baseline and current snapshot CSVs, writing deterministic delta reports.
+- **State Transition Classification:** Detects `PRODUCT_ADDED`, `PRODUCT_REMOVED`, `PRICE_CHANGE`, `STOCKOUT`, and `RESTOCK`.
+- **CLI & Automated Reporting:** Accepts external baseline and current snapshot CSVs, outputting structured delta tables.
 
 ## Usage
 

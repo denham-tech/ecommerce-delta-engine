@@ -1,5 +1,0 @@
-variant_id,title,sku,old_price,new_price,price_delta,change_pct,was_in_stock,is_in_stock,audit_timestamp
-101,Core Crewneck - Black,CRW-BLK-M,95.0,85.0,-10.0,-10.53,True,True,2026-09-11T07:18:16.867509
-102,Denim Trouser - Raw,DNM-RAW-32,160.0,160.0,0.0,0.0,True,False,2026-09-11T07:18:16.867509
-104,Boxy Tee - White,TEE-WHT-L,45.0,50.0,5.0,11.11,True,True,2026-09-11T07:18:16.867509
-105,Heavy Hoodie - Olive,HD-OLV-XL,130.0,130.0,0.0,0.0,False,True,2026-09-11T07:18:16.867509
