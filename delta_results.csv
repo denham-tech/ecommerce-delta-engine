@@ -1,0 +1,5 @@
+variant_id,event_type,title,sku,price_delta,detail
+1001,PRICE_CHANGE,Vintage Heavyweight Tee - Black / M,VHT-BLK-M,-7.0,Price adjusted -15.56% ($45.00 -> $38.00)
+1002,STOCKOUT,Vintage Heavyweight Tee - Black / L,VHT-BLK-L,0.0,Availability transitioned from True to False
+1004,PRODUCT_REMOVED,Canvas Work Jacket - Tan / L,CWJ-TAN-L,0.0,Variant removed from active storefront catalog
+1005,PRODUCT_ADDED,Utility Cargo Pant - Olive / 32,UCP-OLV-32,0.0,New item introduced at $95.00

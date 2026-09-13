@@ -1,0 +1,5 @@
+variant_id,title,sku,price,available
+1001,Vintage Heavyweight Tee - Black / M,VHT-BLK-M,38.00,True
+1002,Vintage Heavyweight Tee - Black / L,VHT-BLK-L,45.00,False
+1003,Relaxed Denim Trouser - Raw / 32,RDT-RAW-32,110.00,True
+1005,Utility Cargo Pant - Olive / 32,UCP-OLV-32,95.00,True

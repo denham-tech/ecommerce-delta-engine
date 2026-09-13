@@ -1,13 +1,14 @@
-# E-Commerce Inventory & Price Delta Engine
+# E-Commerce Catalog Delta Engine
 
-Autonomous telemetry and change-detection engine built with **Python**, **Pandas**, and **SQLite**. Computes daily storefront snapshot deltas to detect competitor pricing shifts, variant stockouts, and catalog anomalies across multi-SKU retail environments.
+Relational delta processing engine designed to isolate state changes between e-commerce catalog snapshots. Computes SKU-level additions, removals, stockout transitions, and price fluctuations across batch crawl intervals.
 
 ## Core Capabilities
-- **Relational Snapshot Analysis:** Inner-merges sequential crawl states on normalized variant IDs to isolate pricing and stock deviations.
-- **Automated Anomaly Detection:** Filters non-zero delta variance and availability status shifts.
-- **Relational Sink & Audit Delivery:** Generates clean executive CSV anomaly reports and logs historical deltas to an audit SQLite database.
+- **Relational Snapshot Diffing:** Outer merge comparison on variant primary keys (`variant_id`).
+- **State Transition Classification:** Identifies `PRODUCT_ADDED`, `PRODUCT_REMOVED`, `PRICE_CHANGE`, `STOCKOUT`, and `RESTOCK`.
+- **CLI & Automated Reporting:** Accepts external baseline and current snapshot CSVs, writing deterministic delta reports.
 
-## Architecture
-- `delta_engine.py` - Ingestion, relational diffing, and persistence pipeline.
-- `catalog_delta_report.csv` - Operational client-facing delta deliverable (untracked).
-- `delta_warehouse.db` - Persistent relational store for historical trend analysis (untracked).
+## Usage
+
+```bash
+# Compare consecutive catalog crawl snapshots
+python delta_engine.py --baseline data/snapshot_day1.csv --current data/snapshot_day2.csv --output delta_results.csv

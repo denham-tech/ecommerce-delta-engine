@@ -1,110 +1,138 @@
+"""
+Relational Catalog Delta Engine
+Compares current e-commerce catalog snapshots against baseline data
+to identify new variants, stockouts, and price shifts.
+"""
+
+import argparse
+import logging
 import sqlite3
+import sys
+from pathlib import Path
+from typing import Tuple
 import pandas as pd
-from datetime import datetime
 
-class InventoryDeltaEngine:
-    def __init__(self, db_path: str = "delta_warehouse.db"):
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[logging.StreamHandler(sys.stdout)]
+)
+logger = logging.getLogger("DeltaEngine")
+
+
+class CatalogDeltaEngine:
+    def __init__(self, db_path: str = "warehouse.db"):
         self.db_path = db_path
-        self.conn = sqlite3.connect(self.db_path)
 
-    def load_snapshots(self, previous_csv: str, current_csv: str):
+    def load_snapshot(self, file_path: str) -> pd.DataFrame:
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Snapshot not found: {file_path}")
+        df = pd.read_csv(path)
+        required = {"variant_id", "title", "sku", "price", "available"}
+        if not required.issubset(df.columns):
+            raise ValueError(f"File missing required columns: {required - set(df.columns)}")
+        return df
+
+    def compute_deltas(self, baseline_df: pd.DataFrame, current_df: pd.DataFrame) -> pd.DataFrame:
         """
-        Loads baseline and current crawl snapshots into normalized DataFrames.
-        """
-        df_prev = pd.read_csv(previous_csv)
-        df_curr = pd.read_csv(current_csv)
-
-        # Force required schemas
-        df_prev["price"] = pd.to_numeric(df_prev["price"], errors="coerce")
-        df_curr["price"] = pd.to_numeric(df_curr["price"], errors="coerce")
-
-        return df_prev, df_curr
-
-    def compute_deltas(self, df_prev: pd.DataFrame, df_curr: pd.DataFrame) -> pd.DataFrame:
-        """
-        Performs an outer relational merge on variant_id to isolate price shifts and stock status.
+        Performs an outer relational merge on variant_id to calculate state transitions.
         """
         merged = pd.merge(
-            df_prev,
-            df_curr,
+            baseline_df,
+            current_df,
             on="variant_id",
-            suffixes=("_prev", "_curr"),
-            how="inner"
+            how="outer",
+            suffixes=("_prev", "_curr")
         )
 
-        # Calculate absolute and percentage price shift
-        merged["price_delta"] = merged["price_curr"] - merged["price_prev"]
-        merged["price_change_pct"] = ((merged["price_delta"] / merged["price_prev"]) * 100).round(2)
+        deltas = []
+        for _, row in merged.iterrows():
+            variant_id = row["variant_id"]
 
-        # Flag inventory changes (available -> out of stock or vice-versa)
-        merged["stock_status_changed"] = merged["available_prev"] != merged["available_curr"]
+            # Scenario 1: New SKU Added
+            if pd.isna(row["price_prev"]):
+                deltas.append({
+                    "variant_id": variant_id,
+                    "event_type": "PRODUCT_ADDED",
+                    "title": row["title_curr"],
+                    "sku": row["sku_curr"],
+                    "price_delta": 0.0,
+                    "detail": f"New item introduced at ${row['price_curr']:.2f}"
+                })
+                continue
 
-        # Filter for significant business events
-        anomalies = merged[
-            (merged["price_delta"] != 0) | (merged["stock_status_changed"] == True)
-        ].copy()
+            # Scenario 2: SKU Removed / Delisted
+            if pd.isna(row["price_curr"]):
+                deltas.append({
+                    "variant_id": variant_id,
+                    "event_type": "PRODUCT_REMOVED",
+                    "title": row["title_prev"],
+                    "sku": row["sku_prev"],
+                    "price_delta": 0.0,
+                    "detail": "Variant removed from active storefront catalog"
+                })
+                continue
 
-        # Build clean audit presentation
-        deliverable = pd.DataFrame({
-            "variant_id": anomalies["variant_id"],
-            "title": anomalies["title_curr"],
-            "sku": anomalies["sku_curr"],
-            "old_price": anomalies["price_prev"],
-            "new_price": anomalies["price_curr"],
-            "price_delta": anomalies["price_delta"],
-            "change_pct": anomalies["price_change_pct"],
-            "was_in_stock": anomalies["available_prev"],
-            "is_in_stock": anomalies["available_curr"],
-            "audit_timestamp": datetime.utcnow().isoformat()
-        })
+            # Scenario 3: Price Change
+            price_prev = float(row["price_prev"])
+            price_curr = float(row["price_curr"])
+            if price_curr != price_prev:
+                pct_change = round(((price_curr - price_prev) / price_prev) * 100, 2)
+                deltas.append({
+                    "variant_id": variant_id,
+                    "event_type": "PRICE_CHANGE",
+                    "title": row["title_curr"],
+                    "sku": row["sku_curr"],
+                    "price_delta": round(price_curr - price_prev, 2),
+                    "detail": f"Price adjusted {pct_change}% (${price_prev:.2f} -> ${price_curr:.2f})"
+                })
 
-        return deliverable
+            # Scenario 4: Inventory State Shift (Stockout / Restock)
+            avail_prev = bool(row["available_prev"])
+            avail_curr = bool(row["available_curr"])
+            if avail_prev != avail_curr:
+                event = "RESTOCK" if avail_curr else "STOCKOUT"
+                deltas.append({
+                    "variant_id": variant_id,
+                    "event_type": event,
+                    "title": row["title_curr"],
+                    "sku": row["sku_curr"],
+                    "price_delta": 0.0,
+                    "detail": f"Availability transitioned from {avail_prev} to {avail_curr}"
+                })
 
-    def persist_deltas(self, delta_df: pd.DataFrame):
-        """
-        Exports audit report to CSV and logs anomalies into SQLite table.
-        """
+        delta_df = pd.DataFrame(deltas)
+        return delta_df
+
+    def persist_deltas(self, delta_df: pd.DataFrame, output_csv: str) -> None:
         if delta_df.empty:
-            print("[*] Scan complete: Zero price or stock deltas detected.")
+            logger.info("No delta events detected between catalog snapshots.")
             return
 
-        csv_out = "catalog_delta_report.csv"
-        delta_df.to_csv(csv_out, index=False)
-        print(f"[✓] Exported {len(delta_df)} anomaly alerts to {csv_out}")
+        delta_df.to_csv(output_csv, index=False)
+        logger.info(f"Successfully recorded {len(delta_df)} deltas to {output_csv}")
 
-        delta_df.to_sql("inventory_deltas", self.conn, if_exists="append", index=False)
-        print(f"[✓] Appended delta log into {self.db_path} (Table: 'inventory_deltas')")
 
-    def close(self):
-        self.conn.close()
+def main():
+    parser = argparse.ArgumentParser(description="Compute change deltas between two catalog snapshots.")
+    parser.add_argument("--baseline", "-b", required=True, help="Path to previous catalog snapshot CSV")
+    parser.add_argument("--current", "-c", required=True, help="Path to latest catalog snapshot CSV")
+    parser.add_argument("--output", "-o", default="delta_results.csv", help="Path to export delta CSV")
+
+    args = parser.parse_args()
+
+    engine = CatalogDeltaEngine()
+    try:
+        baseline_df = engine.load_snapshot(args.baseline)
+        current_df = engine.load_snapshot(args.current)
+    except Exception as e:
+        logger.critical(f"Data loading failed: {e}")
+        sys.exit(1)
+
+    delta_df = engine.compute_deltas(baseline_df, current_df)
+    engine.persist_deltas(delta_df, args.output)
 
 
 if __name__ == "__main__":
-    # Operational demonstration using mock delta snapshots
-    import numpy as np
-
-    # Generate synthetic previous baseline
-    baseline_data = {
-        "variant_id": [101, 102, 103, 104, 105],
-        "title": ["Core Crewneck - Black", "Denim Trouser - Raw", "Leather Utility Belt", "Boxy Tee - White", "Heavy Hoodie - Olive"],
-        "sku": ["CRW-BLK-M", "DNM-RAW-32", "BLT-LTH-OS", "TEE-WHT-L", "HD-OLV-XL"],
-        "price": [95.0, 160.0, 75.0, 45.0, 130.0],
-        "available": [True, True, True, True, False]
-    }
-    pd.DataFrame(baseline_data).to_csv("snapshot_t0.csv", index=False)
-
-    # Generate synthetic current snapshot with competitor shifts
-    current_data = {
-        "variant_id": [101, 102, 103, 104, 105],
-        "title": ["Core Crewneck - Black", "Denim Trouser - Raw", "Leather Utility Belt", "Boxy Tee - White", "Heavy Hoodie - Olive"],
-        "sku": ["CRW-BLK-M", "DNM-RAW-32", "BLT-LTH-OS", "TEE-WHT-L", "HD-OLV-XL"],
-        "price": [85.0, 160.0, 75.0, 50.0, 130.0],  # 101 discounted, 104 increased
-        "available": [True, False, True, True, True]     # 102 stocked out, 105 restocked
-    }
-    pd.DataFrame(current_data).to_csv("snapshot_t1.csv", index=False)
-
-    engine = InventoryDeltaEngine()
-    t0, t1 = engine.load_snapshots("snapshot_t0.csv", "snapshot_t1.csv")
-    deltas = engine.compute_deltas(t0, t1)
-    engine.persist_deltas(deltas)
-    engine.close()
+    main()
